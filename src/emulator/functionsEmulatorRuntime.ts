@@ -764,22 +764,22 @@ function rawBodySaver(req: express.Request, res: express.Response, buf: Buffer):
 
 async function processBackground(
   trigger: CloudFunction<any>,
-  proto: any,
+  reqBody: any,
   signature: SignatureType
 ): Promise<void> {
   if (signature === "cloudevent") {
-    return runCloudEvent(trigger, proto);
+    return runCloudEvent(trigger, reqBody);
   }
 
   // All formats of the payload should carry a "data" property. The "context" property does
   // not exist in all versions. Where it doesn't exist, context is everything besides data.
-  const data = proto.data;
-  delete proto.data;
-  const context = proto.context ? proto.context : proto;
+  const data = reqBody.data;
+  delete reqBody.data;
+  const context = reqBody.context ? reqBody.context : reqBody;
 
   // This is due to the fact that the Firestore emulator sends payloads in a newer
   // format than production firestore.
-  if (!proto.eventType || !proto.eventType.startsWith("google.storage")) {
+  if (!reqBody.eventType || !reqBody.eventType.startsWith("google.storage")) {
     if (context.resource && context.resource.name) {
       logDebug("ProcessBackground: lifting resource.name from resource", context.resource);
       context.resource = context.resource.name;
@@ -804,11 +804,11 @@ async function runFunction(func: () => Promise<any>): Promise<any> {
   }
 }
 
-async function runBackground(trigger: CloudFunction<any>, proto: any): Promise<any> {
-  logDebug("RunBackground", proto);
+async function runBackground(trigger: CloudFunction<any>, reqBody: any): Promise<any> {
+  logDebug("RunBackground", reqBody);
 
   await runFunction(() => {
-    return trigger(proto.data, proto.context);
+    return trigger(reqBody.data, reqBody.context);
   });
 }
 
@@ -1049,15 +1049,15 @@ async function main(): Promise<void> {
       switch (FUNCTION_SIGNATURE) {
         case "event":
         case "cloudevent":
-          const reqBody = (req as RequestWithRawBody).rawBody;
-          let proto = JSON.parse(reqBody.toString());
+          const rawBody = (req as RequestWithRawBody).rawBody;
+          let reqBody = JSON.parse(rawBody.toString());
           if (req.headers["content-type"]?.includes("cloudevent")) {
             if (EventUtils.isBinaryCloudEvent(req)) {
-              proto = EventUtils.extractBinaryCloudEventContext(req);
-              proto.data = req.body;
+              reqBody = EventUtils.extractBinaryCloudEventContext(req);
+              reqBody.data = req.body;
             }
           }
-          await processBackground(trigger, proto, FUNCTION_SIGNATURE);
+          await processBackground(trigger, reqBody, FUNCTION_SIGNATURE);
           res.send({ status: "acknowledged" });
           break;
         case "http":
@@ -1072,7 +1072,7 @@ async function main(): Promise<void> {
   const server = app.listen(process.env.PORT, () => {
     logDebug(`Listening to port: ${process.env.PORT}`);
   });
-  if (process.env.FUNCTIONS_EMULATOR_DISABLE_TIMEOUT !== "true") {
+  if (!FUNCTION_DEBUG_MODE) {
     let timeout = process.env.FUNCTIONS_EMULATOR_TIMEOUT_SECONDS || "60";
     if (timeout.endsWith("s")) {
       timeout = timeout.slice(0, -1);
