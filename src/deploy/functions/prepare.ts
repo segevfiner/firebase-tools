@@ -233,8 +233,6 @@ export async function prepare(
   await ensureServiceAgentRoles(projectId, projectNumber, matchingBackend, haveBackend);
   await validate.secretsAreValid(projectId, matchingBackend);
   await ensure.secretAccess(projectId, matchingBackend, haveBackend);
-
-  // ===Phase 7. Filter No-Op functions from prepare step
 }
 
 /**
