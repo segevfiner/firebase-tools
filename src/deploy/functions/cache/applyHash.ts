@@ -10,7 +10,7 @@ export async function applyBackendHashToBackends(
   context: args.Context
 ) {
   for (const [codebase, wantBackend] of Object.entries(wantBackends)) {
-    const source = context?.sources?.[codebase];
+    const source = context?.sources?.[codebase]; // populated earlier in prepare flow
     await applyBackendHashToBackend(wantBackend, source);
   }
 }
@@ -20,13 +20,17 @@ export async function applyBackendHashToBackends(
  */
 export async function applyBackendHashToBackend(wantBackend: Backend, source?: args.Source) {
   // Blocked by #4852
-  // const hash = await getBackendHash(wantBackend: backend.Backend, source?: args.Source);
-  const hash = "Hash" + wantBackend + source;
-  allEndpoints(wantBackend).forEach((endpoint: Endpoint) => {
-    // Blocked by #4866
-    // endpoint.hash = hash;
-    // endpoint.labels[LABEL_HASH] = hash;
+  // const v1FunctionHash = await getBackendHash(wantBackend, source.functionsSourceV1);
+  // const v2FunctionHash = await getBackendHash(wantBackend, source.functionsSourceV2);
+  const v1FunctionHash = "Hash-v1" + wantBackend + source;
+  const v2FunctionHash = "Hash-v2" + wantBackend + source;
 
-    endpoint.labels?.["hash"] = hash;
+  allEndpoints(wantBackend).forEach((endpoint: Endpoint) => {
+    const isV2 = endpoint.platform === "gcfv2";
+    // Blocked by #4866
+    // endpoint.hash = isV2 ? v2FunctionHash : v1FunctionHash;
+    // endpoint.labels[LABEL_HASH] = isV2 ? v2FunctionHash : v1FunctionHash;
+
+    endpoint.labels["hash"] = isV2 ? v2FunctionHash : v1FunctionHash;
   });
 }
