@@ -1,13 +1,15 @@
 import * as http from "http";
 import * as uuid from "uuid";
+import * as express from "express";
 
-import { FunctionsRuntimeInstance, InvokeRuntimeOpts } from "./functionsEmulator";
+import { FunctionsRuntimeInstance } from "./functionsEmulator";
 import { EmulatorLog, Emulators, FunctionsExecutionMode } from "./types";
-import { FunctionsRuntimeArgs, FunctionsRuntimeBundle } from "./functionsEmulatorShared";
+import { FunctionsRuntimeBundle, getTemporarySocketPath } from "./functionsEmulatorShared";
 import { EventEmitter } from "events";
 import { EmulatorLogger, ExtensionLogInfo } from "./emulatorLogger";
 import { FirebaseError } from "../error";
 import { Serializable } from "child_process";
+import * as spawn from "cross-spawn";
 
 type LogListener = (el: EmulatorLog) => any;
 
@@ -99,12 +101,43 @@ export class RuntimeWorker {
     return lines[lines.length - 1];
   }
 
-  execute(frb: FunctionsRuntimeBundle, opts?: InvokeRuntimeOpts): void {
-    // Make a copy so we don't edit it
-    const execFrb: FunctionsRuntimeBundle = { ...frb };
-    const args: FunctionsRuntimeArgs = { frb: execFrb, opts };
+  sendDebugMsg(debug: FunctionsRuntimeBundle["debug"]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.runtime.process.send(JSON.stringify(debug), (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  request(req: http.RequestOptions, resp: express.Response, body?: unknown): Promise<void> {
     this.state = RuntimeWorkerState.BUSY;
-    this.runtime.process.send(JSON.stringify(args));
+    return new Promise((resolve, reject) => {
+      const proxy = http.request(
+        {
+          method: req.method,
+          path: req.path,
+          headers: req.headers,
+          socketPath: this.runtime.socketPath,
+        },
+        (_resp) => {
+          resp.writeHead(_resp.statusCode || 200, _resp.headers);
+          const piped = _resp.pipe(resp);
+          piped.on("finish", resolve);
+        }
+      );
+      proxy.on("error", (err) => {
+        resp.status(500).send(err);
+        reject(err);
+      });
+      if (body) {
+        proxy.write(body);
+      }
+      proxy.end();
+    });
   }
 
   get state(): RuntimeWorkerState {
@@ -263,29 +296,33 @@ export class RuntimeWorkerPool {
   }
 
   /**
-   * Submit work to be run by an idle worker for the givenn triggerId.
-   * Calls to this function should be guarded by readyForWork() to avoid throwing
-   * an exception.
+   * Submit request to be handled by an idle worker for the given triggerId.
+   * Caller should ensure that there is an idle worker to handle the request.
    *
    * @param triggerId
-   * @param frb
-   * @param opts
+   * @param req Request to send to the trigger.
+   * @param resp Response to proxy the response from the worker.
+   * @param body Request body.
+   * @param debug Debug payload to send prior to making request.
    */
-  submitWork(
-    triggerId: string | undefined,
-    frb: FunctionsRuntimeBundle,
-    opts?: InvokeRuntimeOpts
-  ): RuntimeWorker {
+  async submitRequest(
+    triggerId: string,
+    req: http.RequestOptions,
+    resp: express.Response,
+    body: unknown,
+    debug?: FunctionsRuntimeBundle["debug"]
+  ): Promise<void> {
     this.log(`submitWork(triggerId=${triggerId})`);
     const worker = this.getIdleWorker(triggerId);
     if (!worker) {
       throw new FirebaseError(
-        "Internal Error: can't call submitWork without checking for idle workers"
+        "Internal Error: can't call submitRequest without checking for idle workers"
       );
     }
-
-    worker.execute(frb, opts);
-    return worker;
+    if (debug) {
+      await worker.sendDebugMsg(debug);
+    }
+    return worker.request(req, resp, body);
   }
 
   getIdleWorker(triggerId: string | undefined): RuntimeWorker | undefined {
@@ -303,6 +340,43 @@ export class RuntimeWorkerPool {
     }
 
     return;
+  }
+
+  mustGetIdleWorker(triggerId: string | undefined): RuntimeWorker {
+    const maybeWorker = this.getIdleWorker(triggerId);
+    if (!maybeWorker) {
+      throw new FirebaseError(
+        `Internal Error: No idle worker for trigger=${triggerId}. Did you forget to call spawnWorker?`
+      );
+    }
+    return maybeWorker;
+  }
+
+  async spawnWorker(
+    triggerId: string,
+    bin: string,
+    args: string[],
+    cwd: string,
+    env: Record<string, string>,
+    extensionLogInfo: ExtensionLogInfo
+  ): Promise<RuntimeWorker> {
+    const socketPath = getTemporarySocketPath();
+    const childProcess = spawn(bin, args, {
+      cwd,
+      env: { ...env, PORT: socketPath },
+      stdio: ["pipe", "pipe", "pipe", "ipc"],
+    });
+    const emitter = new EventEmitter();
+
+    const runtime: FunctionsRuntimeInstance = {
+      process: childProcess,
+      events: emitter,
+      cwd,
+      socketPath,
+    };
+    const worker = this.addWorker(triggerId, runtime, extensionLogInfo);
+    await worker.waitForSocketReady();
+    return worker;
   }
 
   addWorker(
