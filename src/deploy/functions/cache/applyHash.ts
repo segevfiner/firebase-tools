@@ -1,11 +1,12 @@
-import * as backend from "../backend";
+import { Backend, Endpoint, allEndpoints } from "../backend";
 import * as args from "../args";
 
 /**
  *
+ * Updates all the CodeBase {@link Backend}, applying a hash to each of their {@link Endpoint}.
  */
 export async function applyBackendHashToBackends(
-  wantBackends: Record<string, backend.Backend>,
+  wantBackends: Record<string, Backend>,
   context: args.Context
 ) {
   for (const [codebase, wantBackend] of Object.entries(wantBackends)) {
@@ -15,13 +16,13 @@ export async function applyBackendHashToBackends(
 }
 
 /**
- *
+ * Updates {@link Backend}, applying a unique hash to each {@link Endpoint}.
  */
-export async function applyBackendHashToBackend(wantBackend: backend.Backend, source?: args.Source) {
+export async function applyBackendHashToBackend(wantBackend: Backend, source?: args.Source) {
   // Blocked by #4852
   // const hash = await getBackendHash(wantBackend: backend.Backend, source?: args.Source);
   const hash = "Hash" + wantBackend + source;
-  backend.allEndpoints(wantBackend).forEach((endpoint) => {
+  allEndpoints(wantBackend).forEach((endpoint: Endpoint) => {
     // Blocked by #4866
     // endpoint.hash = hash;
     // endpoint.labels[LABEL_HASH] = hash;
