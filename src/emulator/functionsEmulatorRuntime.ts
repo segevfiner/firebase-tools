@@ -930,11 +930,6 @@ async function flushAndExit(code: number) {
   process.exit(code);
 }
 
-async function goIdle() {
-  new EmulatorLog("SYSTEM", "runtime-status", "Runtime is now idle", { state: "idle" }).log();
-  await EmulatorLog.waitForFlush();
-}
-
 async function handleMessage(message: string) {
   let debug: FunctionsRuntimeBundle["debug"];
   try {
@@ -1069,7 +1064,6 @@ async function main(): Promise<void> {
       new EmulatorLog("FATAL", "runtime-error", err.stack ? err.stack : err).log();
       res.status(500).send(err.message);
     }
-    await goIdle();
   });
   const server = app.listen(process.env.PORT, () => {
     logDebug(`Listening to port: ${process.env.PORT}`);

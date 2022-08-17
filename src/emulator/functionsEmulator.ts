@@ -23,7 +23,6 @@ import {
   EventSchedule,
   EventTrigger,
   formatHost,
-  FunctionsRuntimeBundle,
   FunctionsRuntimeFeatures,
   getFunctionService,
   getSignatureType,
@@ -321,7 +320,7 @@ export class FunctionsEmulator implements EmulatorInstance {
   }
 
   async sendRequest(trigger: EmulatedTriggerDefinition, body?: any) {
-    const record = this.getTriggerRecordByKey(trigger.id);
+    const record = this.getTriggerRecordByKey(this.getTriggerKey(trigger));
     if (!this.workerPool.readyForWork(trigger.id)) {
       await this.startRuntime(record.backend, trigger);
     }
@@ -958,13 +957,6 @@ export class FunctionsEmulator implements EmulatorInstance {
   setTriggersForTesting(triggers: EmulatedTriggerDefinition[], backend: EmulatableBackend) {
     this.triggers = {};
     triggers.forEach((def) => this.addTriggerRecord(def, { backend, ignored: false }));
-  }
-
-  getBaseBundle(): FunctionsRuntimeBundle {
-    return {
-      proto: {},
-      disabled_features: this.args.disabledRuntimeFeatures,
-    };
   }
 
   getNodeBinary(backend: EmulatableBackend): string {
