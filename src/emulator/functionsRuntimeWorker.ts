@@ -1,6 +1,5 @@
 import * as http from "http";
 import * as uuid from "uuid";
-import * as express from "express";
 
 import { FunctionsRuntimeInstance } from "./functionsEmulator";
 import { EmulatorLog, Emulators, FunctionsExecutionMode } from "./types";
@@ -42,19 +41,6 @@ export class RuntimeWorker {
     this.id = uuid.v4();
     this.key = key;
     this.runtime = runtime;
-
-    this.runtime.events.on("log", (log: EmulatorLog) => {
-      if (log.type === "runtime-status") {
-        if (log.data.state === "idle") {
-          if (this.state === RuntimeWorkerState.BUSY) {
-            this.state = RuntimeWorkerState.IDLE;
-          } else if (this.state === RuntimeWorkerState.FINISHING) {
-            this.log(`IDLE --> FINISHING`);
-            this.runtime.process.kill();
-          }
-        }
-      }
-    });
 
     const childProc = this.runtime.process;
     let msgBuffer = "";
@@ -113,9 +99,17 @@ export class RuntimeWorker {
     });
   }
 
-  request(req: http.RequestOptions, resp: express.Response, body?: unknown): Promise<void> {
+  request(req: http.RequestOptions, resp: http.ServerResponse, body?: unknown): Promise<void> {
     this.state = RuntimeWorkerState.BUSY;
-    return new Promise((resolve, reject) => {
+    const onFinish = (): void => {
+      if (this.state === RuntimeWorkerState.BUSY) {
+        this.state = RuntimeWorkerState.IDLE;
+      } else if (this.state === RuntimeWorkerState.FINISHING) {
+        this.log(`IDLE --> FINISHING`);
+        this.runtime.process.kill();
+      }
+    };
+    return new Promise((resolve) => {
       const proxy = http.request(
         {
           method: req.method,
@@ -126,12 +120,18 @@ export class RuntimeWorker {
         (_resp) => {
           resp.writeHead(_resp.statusCode || 200, _resp.headers);
           const piped = _resp.pipe(resp);
-          piped.on("finish", resolve);
+          piped.on("finish", () => {
+            onFinish();
+            resolve();
+          });
         }
       );
       proxy.on("error", (err) => {
-        resp.status(500).send(err);
-        reject(err);
+        resp.writeHead(500);
+        resp.write(JSON.stringify(err));
+        resp.end();
+        this.runtime.process.kill();
+        resolve();
       });
       if (body) {
         proxy.write(body);
@@ -168,24 +168,6 @@ export class RuntimeWorker {
     }
 
     this.runtime.events.on("log", listener);
-  }
-
-  waitForDone(): Promise<any> {
-    if (this.state === RuntimeWorkerState.IDLE || this.state === RuntimeWorkerState.FINISHED) {
-      return Promise.resolve();
-    }
-
-    return new Promise<void>((res) => {
-      const listener = () => {
-        this.stateEvents.removeListener(RuntimeWorkerState.IDLE, listener);
-        this.stateEvents.removeListener(RuntimeWorkerState.FINISHED, listener);
-        res();
-      };
-
-      // Finish on either IDLE or FINISHED states
-      this.stateEvents.once(RuntimeWorkerState.IDLE, listener);
-      this.stateEvents.once(RuntimeWorkerState.FINISHED, listener);
-    });
   }
 
   isSocketReady(): Promise<void> {
@@ -308,11 +290,11 @@ export class RuntimeWorkerPool {
   async submitRequest(
     triggerId: string,
     req: http.RequestOptions,
-    resp: express.Response,
+    resp: http.ServerResponse,
     body: unknown,
     debug?: FunctionsRuntimeBundle["debug"]
   ): Promise<void> {
-    this.log(`submitWork(triggerId=${triggerId})`);
+    this.log(`submitRequest(triggerId=${triggerId})`);
     const worker = this.getIdleWorker(triggerId);
     if (!worker) {
       throw new FirebaseError(

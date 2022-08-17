@@ -950,7 +950,7 @@ async function handleMessage(message: string) {
       FUNCTION_TARGET_NAME = debug.functionTarget;
       FUNCTION_SIGNATURE = debug.functionSignature;
     } else {
-      new EmulatorLog("ERROR", "runtime-warning", "Expected debug payload while in debug mode.");
+      new EmulatorLog("WARN", "runtime-warning", "Expected debug payload while in debug mode.");
     }
   }
 }
