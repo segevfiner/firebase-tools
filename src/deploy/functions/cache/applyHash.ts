@@ -29,8 +29,7 @@ export async function applyBackendHashToBackend(wantBackend: Backend, source?: a
     const isV2 = endpoint.platform === "gcfv2";
     // Blocked by #4866
     // endpoint.hash = isV2 ? v2FunctionHash : v1FunctionHash;
-    // endpoint.labels[LABEL_HASH] = isV2 ? v2FunctionHash : v1FunctionHash;
 
-    endpoint.labels["hash"] = isV2 ? v2FunctionHash : v1FunctionHash;
+    endpoint.hash = isV2 ? v2FunctionHash : v1FunctionHash;
   });
 }
