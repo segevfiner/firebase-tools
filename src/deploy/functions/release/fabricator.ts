@@ -125,6 +125,10 @@ export class Fabricator {
       this.logOpStart("creating", endpoint);
       upserts.push(handle("create", endpoint, () => this.createEndpoint(endpoint, scraper)));
     }
+    for (const endpoint of changes.endpointsToSkip) {
+      this.logOpStart("skipping", endpoint);
+      upserts.push(handle("skip", endpoint, () => this.skipEndpoint()));
+    }
     for (const update of changes.endpointsToUpdate) {
       this.logOpStart("updating", update.endpoint);
       upserts.push(handle("update", update.endpoint, () => this.updateEndpoint(update, scraper)));
@@ -165,6 +169,10 @@ export class Fabricator {
     }
 
     await this.setTrigger(endpoint);
+  }
+
+  async skipEndpoint(): Promise<void> {
+    await Promise.resolve();
   }
 
   async updateEndpoint(update: planner.EndpointUpdate, scraper: SourceTokenScraper): Promise<void> {
